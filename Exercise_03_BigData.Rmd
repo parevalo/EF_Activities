@@ -183,14 +183,12 @@ plot(doy,filter(NEE[i,],rep(1/24,24)),type='l',main=paste("Height =",height[i],"
 Alternative, if I just wanted to get a subset of air temperature data (e.g. 24 hours of data from the top height for the 220th day of the year)
 
 ```{r}
-start = which(doy > 220)[1]
+start = which(doy > 220)[1] #Why not which(doy == 220)??
 wlef = nc_open("US-PFa-WLEF-TallTowerClean-2012-L0-vFeb2013.nc")
 TA = ncvar_get(wlef,"TA",c(3,start),c(1,24))
 plot(TA,type = 'l')
 nc_close(wlef)
 ```
-
-
 
 **Question 4:** 
 
@@ -225,7 +223,7 @@ MODISSubsets(data.frame(lat=46.0827,long=-89.9792,start.date=2012,end.date=2012)
 This function doesn't load the data directly into R, but instead saves it to your computer, so next we need to load the data.
 
 ```{r}
-MODIS = read.csv(list.files(pattern=".asc")[1],header=FALSE,as.is=TRUE,na.string="-3000")
+ MODIS = read.csv(list.files(pattern=".asc")[1],header=FALSE,as.is=TRUE,na.string="-3000")
 ```
 
 The data is arranged with the rows being the dates, the first 10 columns being the metadata, and the remaining columns being the observations. Here we extracted a 250m data products and looked +/ 1km in both directions, which gives us a 9x9 area and thus 81 data rows (and 86 rows total). For this example lets average over the spatial data and just generate a time-series of EVI. Also, lets extract the year (%Y) and day of year (%j) from column 3 and convert these to observation dates.
@@ -237,8 +235,8 @@ time = as.Date(substr(MODIS[,10],1,7),format="%Y%j")
 
 **Question 5:** Plot EVI versus time and compare to the CO2 flux observations.
 
-cron
-----
+
+
 
 The last topic I wanted to touch on isn't for data processing per se, but is handy for scheduling the automatic execution of tasks, and thus is frequently used in dynamic big data problems where new data is arriving on a regular basis and analyses need to be updated. An obvious example in the context of this course would be a forecast that would be updated on a daily or weekly basis. [note: like grep, cron is a *nix utility, so will run on linux, unix, and Mac OS, but not Windows].
 

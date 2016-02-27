@@ -113,7 +113,7 @@ As you can see, the quantile function is the inverse of the CDF.  This function 
 
 ```{r}
 qnorm(c(0.025,0.975),0,1)		# what width CI is specified by these values?
-plot(p,qnorm(p,0,1),type='l',ylim=range(x))
+plot(p,qnorm(p,0, 1),type='l',ylim=range(x))
 abline(v=c(0.025,0.975),lty=2)	# add vertical lines at the CI
 abline(h=qnorm(c(0.025,0.975)),lty=2)	#add horizontal lines at the threshold vals
 plot(x,dnorm(x,0,1),type='l')		# plot the corresponding pdf
@@ -206,7 +206,7 @@ Unfortunately, R doesn't have a built in function for plotting shaded CI on time
 ```{r}
 ciEnvelope <- function(x,ylo,yhi,col="lightgrey",...){
   polygon(cbind(c(x, rev(x), x[1]), c(ylo, rev(yhi),
-  ylo[1])), border = NA,...) 
+  ylo[1])), border = NA,col=col, ...) 
 }
 ```
 
