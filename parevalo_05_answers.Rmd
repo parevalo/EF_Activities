@@ -1,0 +1,160 @@
+---
+title: "JAGS"
+author: "Paulo Arevalo"
+date: "February 28, 2016"
+output: html_document
+---
+
+## Activity 1
+
+```{r}
+require(rjags)
+require(coda)
+```
+
+
+```{r}
+NormalMeanN <- "
+model {
+  mu ~ dnorm(mu0,T) # prior on the mean 
+  for(i in 1:N){
+    X[i] ~ dnorm(mu,S) # data model
+  }
+}
+"
+```
+
+The data for fiting this model are
+
+```{r}
+data = list(N = 297, mu0=20, T=0.01, S = 1/27, X = c(20.9, 13.6, 15.7, 6.3, 2.7, 25.6, 4, 20.9, 7.8, 27.1, 25.2, 19, 17.8, 22.8, 12.5, 21.1, 22, 22.4, 5.1, 16, 20.7, 15.7, 5.5, 18.9, 22.9, 15.5, 18.6, 19.3, 14.2, 12.3, 11.8, 26.8, 17, 5.7, 12, 19.8, 19, 23.6, 19.9, 8.4, 22, 18.1, 21.6, 17, 12.4, 2.9, 22.6, 20.8, 18.2, 14.2, 17.3, 14.5, 8.6, 9.1, 2.6, 19.8, 20, 22.2, 10.2, 12.9, 20.9, 21.1, 7.3, 5.8, 23.1, 17, 21.5, 10.1, 18.4, 22.6, 21.2, 21.5, 22.4, 17.3, 16, 25, 22.4, 23.9, 23, 21.9, 19, 28.6, 16, 22.5, 23.2, 8.7, 23.4, 15.3, 25.6, 19.2, 17.4, 23.8, 20.4, 19, 3.6, 23.4, 19.6, 17.5, 16.5, 22, 19.7, 7.35, 18, 17.8, 9.6, 15, 12, 17.7, 21.4, 17, 22.1, 18.9, 15.05, 12.9, 19.3, 15.3, 13.6, 15.4, 10.6, 11.3, 11.8, 22.2, 22.2, 13.1, 7.4, 4.5, 11.7, 19.5, 19.9, 11.6, 13.9, 15.5, 11, 18.6, 17.6, 12.7, 20.9, 18.8, 22.4, 21.2, 18.2, 15.3, 13.6, 7.3, 17.4, 17.4, 10.5, 22.9, 23.2, 13.8, 14.8, 22.2, 20.9, 13, 18.9, 19, 15.2, 16.8, 18, 24.6, 15.4, 17.2, 23.2, 22.8, 25.5, 7.8, 6, 6.4, 19, 13.5, 23.7, 18, 22.2, 22.4, 9.3, 13.7, 18.9, 20.5, 23.3, 20.8, 18.4, 4.5, 12.2, 16.9, 13.5, 17.8, 16.9, 20.4, 19.5, 22.2, 24.5, 21.2, 16.5, 18, 16.4, 3.9, 17.9, 22, 12.9, 21, 18, 9.2, 15.9, 8.1, 8.3, 10.7, 12, 19.9, 13.6, 17.3, 11.5, 12.4, 15.1, 22, 19.3, 17.5, 14.5, 14.7, 17.5, 19.6, 12.9, 20.3, 17.9, 20.2, 18.3, 9.5, 19, 21, 13.1, 20.4, 16.3, 18.3, 11.8, 23.3, 15.2, 20, 17.9, 12, 19.6, 18.5, 16.2, 10.9, 17.8, 13.8, 10, 17.9, 15.6, 20.3, 14.9, 18.6, 12.5, 18.2, 16, 18.7, 18, 15.3, 19, 17.9, 15.8, 17.7, 14.4, 19.6, 18.3, 18.7, 17.8, 18, 10.1, 18.8, 16.4, 21.2, 16.6, 16.7, 17.8, 16.5, 19.3, 16.3, 14.2, 13, 9.4, 19.7, 13.4, 2.6, 17.6, 16.7, 17.6, 5.8, 17.6, 20.1, 18.2, 16.7, 14, 13.9, 5.1, 16.6, 3.9, 17.5, 18))
+```
+
+```{r}
+j.model   <- jags.model (file = textConnection(NormalMeanN),
+                             data = data,
+                             n.chains = 3)
+
+jags.out   <- coda.samples (model = j.model,
+                            variable.names = c("mu"),
+                                n.iter = 1000)
+```
+
+```{r}
+plot(jags.out)
+```
+
+```{r}
+gelman.diag(jags.out)
+GBR <- gelman.plot(jags.out)
+```
+
+```{r}
+## determine the first iteration after convergence
+burnin <- GBR$last.iter[tail(which(GBR$shrink[,,2] > 1.1),1)+1]
+```
+
+Burning value of `r burnin`, where GRB factor drops below 1.1
+
+```{r}
+## check for no burn-in case
+if(length(burnin) == 0) burnin = 1
+## remove burn-in
+jags.burn <- window(jags.out,start=burnin)
+## check diagnostics post burn-in
+gelman.diag(jags.burn)
+plot(jags.burn)
+```
+
+```{r}
+lapply(jags.burn, effectiveSize)
+```
+
+Effective size for each chain is smaller than the number of samples being taken. Additionally, since we only care about the mean in this exercise, we don't need a higher number of samples. For these two reasons, the number of samples remains unchanged. 
+
+```{r}
+summary(jags.out)
+```
+
+
+## Activity 2
+
+Prior on S uses previous fixed value as the estimated value, and assumes same desired precision as the mean. 
+
+```{r}
+NormalMean2 <- "
+model {
+  mu ~ dnorm(mu0,T) # prior on the mean 
+  S ~ dnorm(S0, T) # prior on the variance to model its uncertainty
+  for(i in 1:N){
+    X[i] ~ dnorm(mu,S) # data model
+  }
+}
+"
+```
+
+The data for fiting this model are
+
+```{r}
+data2 = list(N = 297, mu0=20, T=0.01, S0 = 1/27, X = c(20.9, 13.6, 15.7, 6.3, 2.7, 25.6, 4, 20.9, 7.8, 27.1, 25.2, 19, 17.8, 22.8, 12.5, 21.1, 22, 22.4, 5.1, 16, 20.7, 15.7, 5.5, 18.9, 22.9, 15.5, 18.6, 19.3, 14.2, 12.3, 11.8, 26.8, 17, 5.7, 12, 19.8, 19, 23.6, 19.9, 8.4, 22, 18.1, 21.6, 17, 12.4, 2.9, 22.6, 20.8, 18.2, 14.2, 17.3, 14.5, 8.6, 9.1, 2.6, 19.8, 20, 22.2, 10.2, 12.9, 20.9, 21.1, 7.3, 5.8, 23.1, 17, 21.5, 10.1, 18.4, 22.6, 21.2, 21.5, 22.4, 17.3, 16, 25, 22.4, 23.9, 23, 21.9, 19, 28.6, 16, 22.5, 23.2, 8.7, 23.4, 15.3, 25.6, 19.2, 17.4, 23.8, 20.4, 19, 3.6, 23.4, 19.6, 17.5, 16.5, 22, 19.7, 7.35, 18, 17.8, 9.6, 15, 12, 17.7, 21.4, 17, 22.1, 18.9, 15.05, 12.9, 19.3, 15.3, 13.6, 15.4, 10.6, 11.3, 11.8, 22.2, 22.2, 13.1, 7.4, 4.5, 11.7, 19.5, 19.9, 11.6, 13.9, 15.5, 11, 18.6, 17.6, 12.7, 20.9, 18.8, 22.4, 21.2, 18.2, 15.3, 13.6, 7.3, 17.4, 17.4, 10.5, 22.9, 23.2, 13.8, 14.8, 22.2, 20.9, 13, 18.9, 19, 15.2, 16.8, 18, 24.6, 15.4, 17.2, 23.2, 22.8, 25.5, 7.8, 6, 6.4, 19, 13.5, 23.7, 18, 22.2, 22.4, 9.3, 13.7, 18.9, 20.5, 23.3, 20.8, 18.4, 4.5, 12.2, 16.9, 13.5, 17.8, 16.9, 20.4, 19.5, 22.2, 24.5, 21.2, 16.5, 18, 16.4, 3.9, 17.9, 22, 12.9, 21, 18, 9.2, 15.9, 8.1, 8.3, 10.7, 12, 19.9, 13.6, 17.3, 11.5, 12.4, 15.1, 22, 19.3, 17.5, 14.5, 14.7, 17.5, 19.6, 12.9, 20.3, 17.9, 20.2, 18.3, 9.5, 19, 21, 13.1, 20.4, 16.3, 18.3, 11.8, 23.3, 15.2, 20, 17.9, 12, 19.6, 18.5, 16.2, 10.9, 17.8, 13.8, 10, 17.9, 15.6, 20.3, 14.9, 18.6, 12.5, 18.2, 16, 18.7, 18, 15.3, 19, 17.9, 15.8, 17.7, 14.4, 19.6, 18.3, 18.7, 17.8, 18, 10.1, 18.8, 16.4, 21.2, 16.6, 16.7, 17.8, 16.5, 19.3, 16.3, 14.2, 13, 9.4, 19.7, 13.4, 2.6, 17.6, 16.7, 17.6, 5.8, 17.6, 20.1, 18.2, 16.7, 14, 13.9, 5.1, 16.6, 3.9, 17.5, 18))
+```
+
+
+```{r}
+j.model2   <- jags.model (file = textConnection(NormalMean2),
+                             data = data2,
+                             n.chains = 3)
+
+jags.out2   <- coda.samples (model = j.model2,
+                            variable.names = c("mu", "S"),
+                                n.iter = 1000)
+```
+
+```{r}
+plot(jags.out2)
+```
+
+```{r}
+gelman.diag(jags.out2)
+GBR2 <- gelman.plot(jags.out2)
+```
+
+```{r}
+## determine the first iteration after convergence
+burnin2_S <- GBR2$last.iter[tail(which(GBR2$shrink[,,2][,1] > 1.1),1)+1] 
+burnin2_mu <- GBR2$last.iter[tail(which(GBR2$shrink[,,2][,2] > 1.1),1)+1] 
+# This last line is returning empty because no values meet the condition for mu
+```
+
+Burning value is `r burnin2_S` for S, where GRB factor drops below 1.1. No values of mu drop below that level.
+
+```{r}
+## check for no burn-in case
+if(length(burnin2_S) == 0) burnin2_S = 1
+if(length(burnin2_mu) == 0) burnin2_mu = 1
+## remove burn-in
+jags.burn2 <- window(jags.out2,start=burnin2_S) #What to do here?
+## check diagnostics post burn-in
+gelman.diag(jags.burn2)
+plot(jags.burn2)
+```
+
+```{r}
+lapply(jags.burn2, effectiveSize)
+cumuplot(jags.out2,probs=c(0.025,0.25,0.5,0.75,0.975))
+
+```
+
+Effective size for S in each chain is smaller than the sample size. However, it is higher for mu in the second chain. The cumulative quantile plot also shows high inestability when samples are less than 1500 or so,  so a much bigger sample size will be used this time.
+
+```{r}
+jags.out3 <- coda.samples(j.model2,variable.names = c("mu", "S"),5000)
+```
+
+We can now check the summary statistics of our variables
+
+```{r}
+summary(jags.out3)
+```
+
+The distribution of the mean in this second activity has a less defined and symmetrical shape compared to activity #1, where we were providing a fixed variance. Location is practically the same, with the two tails looking very similar in both cases. 
