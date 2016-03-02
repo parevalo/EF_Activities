@@ -81,7 +81,7 @@ summary(jags.out)
 
 ## Activity 2
 
-The prior on S uses the diameter mean and variance found in another study that explored diameter variability in lobolly pine plantations [Zeide and Zhang 2000](www.sciencedirect.com/science/article/pii/S0378112799001395). These values are converted to estimates of a and r in order to specify a gamma distribution, comonly used to estimate a precision. 
+The prior on S uses the diameter mean and variance found in another study that explored diameter variability in lobolly pine plantations [(Zeide and Zhang 2000)](http://www.sciencedirect.com/science/article/pii/S0378112799001395). These values are converted to estimates of a and r in order to specify a gamma distribution, comonly used to estimate a precision. 
 
 ```{r}
 NormalMean2 <- "
@@ -105,8 +105,7 @@ The data for fiting this model are:
 data2 = list(N = 297, mu0=20, T=0.01, X = c(20.9, 13.6, 15.7, 6.3, 2.7, 25.6, 4, 20.9, 7.8, 27.1, 25.2, 19, 17.8, 22.8, 12.5, 21.1, 22, 22.4, 5.1, 16, 20.7, 15.7, 5.5, 18.9, 22.9, 15.5, 18.6, 19.3, 14.2, 12.3, 11.8, 26.8, 17, 5.7, 12, 19.8, 19, 23.6, 19.9, 8.4, 22, 18.1, 21.6, 17, 12.4, 2.9, 22.6, 20.8, 18.2, 14.2, 17.3, 14.5, 8.6, 9.1, 2.6, 19.8, 20, 22.2, 10.2, 12.9, 20.9, 21.1, 7.3, 5.8, 23.1, 17, 21.5, 10.1, 18.4, 22.6, 21.2, 21.5, 22.4, 17.3, 16, 25, 22.4, 23.9, 23, 21.9, 19, 28.6, 16, 22.5, 23.2, 8.7, 23.4, 15.3, 25.6, 19.2, 17.4, 23.8, 20.4, 19, 3.6, 23.4, 19.6, 17.5, 16.5, 22, 19.7, 7.35, 18, 17.8, 9.6, 15, 12, 17.7, 21.4, 17, 22.1, 18.9, 15.05, 12.9, 19.3, 15.3, 13.6, 15.4, 10.6, 11.3, 11.8, 22.2, 22.2, 13.1, 7.4, 4.5, 11.7, 19.5, 19.9, 11.6, 13.9, 15.5, 11, 18.6, 17.6, 12.7, 20.9, 18.8, 22.4, 21.2, 18.2, 15.3, 13.6, 7.3, 17.4, 17.4, 10.5, 22.9, 23.2, 13.8, 14.8, 22.2, 20.9, 13, 18.9, 19, 15.2, 16.8, 18, 24.6, 15.4, 17.2, 23.2, 22.8, 25.5, 7.8, 6, 6.4, 19, 13.5, 23.7, 18, 22.2, 22.4, 9.3, 13.7, 18.9, 20.5, 23.3, 20.8, 18.4, 4.5, 12.2, 16.9, 13.5, 17.8, 16.9, 20.4, 19.5, 22.2, 24.5, 21.2, 16.5, 18, 16.4, 3.9, 17.9, 22, 12.9, 21, 18, 9.2, 15.9, 8.1, 8.3, 10.7, 12, 19.9, 13.6, 17.3, 11.5, 12.4, 15.1, 22, 19.3, 17.5, 14.5, 14.7, 17.5, 19.6, 12.9, 20.3, 17.9, 20.2, 18.3, 9.5, 19, 21, 13.1, 20.4, 16.3, 18.3, 11.8, 23.3, 15.2, 20, 17.9, 12, 19.6, 18.5, 16.2, 10.9, 17.8, 13.8, 10, 17.9, 15.6, 20.3, 14.9, 18.6, 12.5, 18.2, 16, 18.7, 18, 15.3, 19, 17.9, 15.8, 17.7, 14.4, 19.6, 18.3, 18.7, 17.8, 18, 10.1, 18.8, 16.4, 21.2, 16.6, 16.7, 17.8, 16.5, 19.3, 16.3, 14.2, 13, 9.4, 19.7, 13.4, 2.6, 17.6, 16.7, 17.6, 5.8, 17.6, 20.1, 18.2, 16.7, 14, 13.9, 5.1, 16.6, 3.9, 17.5, 18))
 ```
 
-
-Three chains are used as rule of thumb in this case, and also because the example is rather trivial. For the same reason, no initial parameters are used. 5000 iterations are used to guarantee convergence without having to resample, and also because of the simplicity of the model, which won't have an impact on performance. 
+Three chains are used as rule of thumb in this case, and also because the example is rather trivial. For the same reason, no initial parameters are used. 3000 iterations are expected to guarantee convergence without having to resample, and also because of the simplicity of the model, which won't have an impact on performance. 
 
 ```{r}
 j.model2   <- jags.model (file = textConnection(NormalMean2),
@@ -133,16 +132,18 @@ GBR2 <- gelman.plot(jags.out2)
 ## determine the first iteration after convergence
 burnin2_S <- GBR2$last.iter[tail(which(GBR2$shrink[,,2][,1] > 1.1),1)+1] 
 burnin2_mu <- GBR2$last.iter[tail(which(GBR2$shrink[,,2][,2] > 1.1),1)+1] 
-```
 
-Burning value is `r burnin2_S` for S, where GRB factor drops below 1.1. Burning value is `r burnin2_mu` for mu, where GRB factor drops below 1.1. 
-
-```{r}
 ## check for no burn-in case
 if(length(burnin2_S) == 0) burnin2_S = 1
 if(length(burnin2_mu) == 0) burnin2_mu = 1
+```
+
+Burning value is `r burnin2_S` for S, where GRB factor drops below 1.1. Burning value is `r burnin2_mu` for mu, where GRB factor drops below 1.1.   
+
+```{r}
 ## remove burn-in
-jags.burn2 <- window(jags.out2,start=burnin2_S) #What to do here?
+burn_value = max(burnin2_S, burnin2_mu) # Choose the highest value to make sure we discard the right burn-in section 
+jags.burn2 <- window(jags.out2,start=burn_value)
 ## check diagnostics post burn-in
 gelman.diag(jags.burn2)
 plot(jags.burn2)
@@ -160,4 +161,4 @@ The effective size values show that the chosen number of iterations is enough to
 summary(jags.out2)
 ```
 
-The distribution of the mean in this second activity has a less defined and symmetrical shape compared to activity #1, where we were providing a fixed variance. Location is practically the same, with the two tails looking very similar in both cases. 
+The distribution of the mean for both activities is very similar. The estimated value of the mean in both cases is very close. However, the standard deviation is slightly higher in the first case, as well as its associated Time-Series SE. 
