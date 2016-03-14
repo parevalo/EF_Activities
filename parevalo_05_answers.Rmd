@@ -75,7 +75,7 @@ lapply(jags.burn, effectiveSize)
 Effective size for each chain is smaller than the number of samples being taken. Additionally, since we only care about the mean in this exercise, we don't need a higher number of samples. For these two reasons, the number of samples remains unchanged. 
 
 ```{r}
-summary(jags.out)
+summary(jags.burn)
 ```
 
 
@@ -151,14 +151,14 @@ plot(jags.burn2)
 
 ```{r}
 lapply(jags.burn2, effectiveSize)
-cumuplot(jags.out2,probs=c(0.025,0.25,0.5,0.75,0.975))
+cumuplot(jags.burn2,probs=c(0.025,0.25,0.5,0.75,0.975))
 
 ```
 
 The effective size values show that the chosen number of iterations is enough to provide sufficiently good estimates of the parameters. The cumulative quantile plots also show a good response. We can now check the summary statistics of our variables
 
 ```{r}
-summary(jags.out2)
+summary(jags.burn2)
 ```
 
 The distribution of the mean for both activities is very similar. The estimated value of the mean in both cases is very close. However, the standard deviation is slightly higher in the first case, as well as its associated Time-Series SE. 
