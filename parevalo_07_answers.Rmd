@@ -1,0 +1,412 @@
+---
+title: "Exercise 7"
+author: "Paulo Arevalo"
+date: "March 21, 2016"
+output: html_document
+---
+
+```{r}
+if(!require(PEcAn.data.land)){
+  install.packages(c("digest","dplR"), repos='http://cran.us.r-project.org')
+  devtools::install_github("PecanProject/pecan/utils")
+  devtools::install_github("PecanProject/pecan/db")
+  devtools::install_github("PecanProject/pecan/modules/data.land")
+  require(PEcAn.data.land)
+}
+require(rjags)
+```
+
+```{r, echo=FALSE}
+#plots a confidence interval around an x-y plot (e.g. a timeseries)
+ciEnvelope <- function(x,ylo,yhi,...){
+  polygon(cbind(c(x, rev(x), x[1]), c(ylo, rev(yhi),
+                                      ylo[1])), border = NA,...) 
+}
+```
+
+
+```{r}
+## 1. Read tree data
+trees <- read.csv("data/H2012AdultFieldData.csv")
+
+## 2. Read tree ring data
+rings <- Read_Tucson("data/TUCSON/")
+
+## 3. merge inventory and tree ring data, extract most recent nyears
+combined <- matchInventoryRings(trees,rings,nyears=17)
+
+## take a look at the first few rows of data to see the structure
+knitr::kable(combined[1:5,])
+
+## 4. organize data into a list
+data <- buildJAGSdata_InventoryRings(combined)
+
+# y = increment (tree x year)
+# z = dbh (tree x year)
+# make sure to take a look at all the priors!
+```
+
+# Fixed effect (Base case)
+
+```{r, fig.height=8}
+
+n.iter = 20000
+
+## this code fuses forest inventory data with tree growth data (tree ring or dendrometer band)
+## for the same plots. Code is a rewrite of Clark et al 2007 Ecol Appl into JAGS
+TreeDataFusionBase = "
+model{
+
+  ### Loop over all individuals
+  for(i in 1:ni){
+  
+  #### Data Model: DBH
+  for(t in 1:nt){
+  z[i,t] ~ dnorm(x[i,t],tau_dbh)
+  }
+  
+  #### Data Model: growth
+  for(t in 2:nt){
+  inc[i,t] <- x[i,t]-x[i,t-1]
+  y[i,t] ~ dnorm(inc[i,t],tau_inc)
+  }
+  
+  #### Process Model
+  for(t in 2:nt){
+  Dnew[i,t] <- x[i,t-1] + mu
+  x[i,t]~dnorm(Dnew[i,t],tau_add)
+  }
+  
+  x[i,1] ~ dnorm(x_ic,tau_ic)
+  }  ## end loop over individuals
+  
+  #### Priors
+  tau_dbh ~ dgamma(a_dbh,r_dbh)
+  tau_inc ~ dgamma(a_inc,r_inc)
+  tau_add ~ dgamma(a_add,r_add)
+  mu ~ dnorm(0.5,0.5)
+}"
+
+  ## state variable initial condition
+  z0 = t(apply(data$y,1,function(y){-rev(cumsum(rev(y)))})) + data$z[,ncol(data$z)] 
+  
+  ## JAGS initial conditions
+  nchain = 3
+  init <- list()
+  for(i in 1:nchain){
+    y.samp = sample(data$y,length(data$y),replace=TRUE)
+    init[[i]] <- list(x = z0,tau_add=runif(1,1,5)/var(diff(y.samp),na.rm=TRUE),
+                      tau_dbh=1,tau_inc=500,tau_ind=50,tau_yr=100,ind=rep(0,data$ni),year=rep(0,data$nt))
+  }
+  
+  ## compile JAGS model
+  j.model   <- jags.model (file = textConnection(TreeDataFusionBase),
+                           data = data,
+                           inits = init,
+                           n.chains = 3)
+  ## burn-in
+  jags.out   <- coda.samples (model = j.model,
+                              variable.names = c("tau_add","tau_dbh","tau_inc","mu","tau_ind","tau_yr"),
+                              n.iter = min(n.iter,2000))
+  plot(jags.out)
+  
+  ## run MCMC
+  jags.out   <- coda.samples (model = j.model,
+                              variable.names = c("x","tau_add","tau_dbh","tau_inc","mu",
+                                                 "tau_ind","tau_yr","ind","year"),
+                              n.iter = n.iter)
+```
+
+## Diagnostic plots - base case
+
+```{r, fig.height=8}
+  #### Diagnostic plots
+  
+  ### DBH
+  layout(matrix(1:8,4,2))
+  out <- as.matrix(jags.out)
+  x.cols = which(substr(colnames(out),1,1)=="x")   ## which columns are the state variable, x
+  ci <- apply(out[,x.cols],2,quantile,c(0.025,0.5,0.975))
+  ci.names = parse.MatrixNames(colnames(ci),numeric=TRUE)
+  
+  smp = c(sample.int(data$ni,3),49)  ## I've rigged the sampling to make sure you see tree 49!
+  for(i in smp){
+    sel = which(ci.names$row == i)
+    plot(data$time,ci[2,sel],type='n',ylim=range(ci[,sel],na.rm=TRUE),ylab="DBH (cm)",main=i)
+    ciEnvelope(data$time,ci[1,sel],ci[3,sel],col="lightBlue")
+    points(data$time,data$z[i,],pch="+",cex=1.5)
+  }
+  
+  ## growth
+  for(i in smp){
+    sel = which(ci.names$row == i)
+    inc.mcmc = apply(out[,x.cols[sel]],1,diff)
+    inc.ci = apply(inc.mcmc,1,quantile,c(0.025,0.5,0.975))*5
+    
+    plot(data$time[-1],inc.ci[2,],type='n',ylim=range(inc.ci,na.rm=TRUE),ylab="Ring Increment (mm)")
+    ciEnvelope(data$time[-1],inc.ci[1,],inc.ci[3,],col="lightBlue")
+    points(data$time,data$y[i,]*5,pch="+",cex=1.5,type='b',lty=2)
+  }
+```
+
+## Mixed effects, mu and precision - base case
+
+```{r}
+  ## process model
+  vars = (1:ncol(out))[-c(which(substr(colnames(out),1,1)=="x"),grep("tau",colnames(out)),
+                          grep("year",colnames(out)),grep("ind",colnames(out)))]
+  par(mfrow=c(1,1))
+  for(i in vars){
+    hist(out[,i],main=colnames(out)[i])
+  }
+  if(length(vars)>1) pairs(out[,vars])
+
+  ## Standard Deviations
+  #layout(matrix(c(1,2,3,3),2,2,byrow=TRUE))
+  par(mfrow=c(2,3))
+  prec = out[,grep("tau",colnames(out))]
+  for(i in 1:ncol(prec)){
+    hist(1/sqrt(prec[,i]),main=colnames(prec)[i])
+  }
+  cor(prec)
+  pairs(prec)
+```
+
+# Random effects (Extended case)
+
+```{r, fig.height=8}
+
+n.iter = 20000
+TreeDataFusionExtended = "
+  
+model{
+  
+  ### Loop over all individuals
+  for(i in 1:ni){
+  
+  #### Data Model: DBH
+  for(t in 1:nt){
+    z[i,t] ~ dnorm(x[i,t],tau_dbh)
+  }
+  
+  #### Data Model: growth
+  for(t in 2:nt){
+    inc[i,t] <- x[i,t]-x[i,t-1]
+    y[i,t] ~ dnorm(inc[i,t],tau_inc)
+  }
+  
+  #### Process Model
+  for(t in 2:nt){
+    Dnew[i,t] <- x[i,t-1] + mu + ind[i] + year[t]
+    x[i,t]~dnorm(Dnew[i,t],tau_add)
+  }
+  
+  ## individual effects
+  ind[i] ~ dnorm(0,tau_ind)
+  
+  ## initial condition
+  x[i,1] ~ dnorm(x_ic,tau_ic)
+  }  ## end loop over individuals
+  
+  ## year effects
+  for(t in 1:nt){
+    year[t] ~ dnorm(0,tau_yr)
+  }
+  
+  
+  #### Priors
+  tau_dbh ~ dgamma(a_dbh,r_dbh)
+  tau_inc ~ dgamma(a_inc,r_inc)
+  tau_add ~ dgamma(a_add,r_add)
+  tau_ind ~ dgamma(1,0.1)
+  tau_yr  ~ dgamma(1,0.1)
+  mu ~ dnorm(0.5,0.5)
+  
+  }"
+  
+  z0 = t(apply(data$y,1,function(y){-rev(cumsum(rev(y)))})) + data$z[,ncol(data$z)] 
+  
+  ## JAGS initial conditions
+  nchain = 3
+  init <- list()
+  for(i in 1:nchain){
+    y.samp = sample(data$y,length(data$y),replace=TRUE)
+    init[[i]] <- list(x = z0,tau_add=runif(1,1,5)/var(diff(y.samp),na.rm=TRUE),
+                      tau_dbh=1,tau_inc=500,tau_ind=50,tau_yr=100,ind=rep(0,data$ni),year=rep(0,data$nt))
+  }
+  
+  ## compile JAGS model
+  j.model2   <- jags.model (file = textConnection(TreeDataFusionExtended),
+                           data = data,
+                           inits = init,
+                           n.chains = 3)
+  ## burn-in
+  jags.out2   <- coda.samples (model = j.model2,
+                              variable.names = c("tau_add","tau_dbh","tau_inc","mu","tau_ind","tau_yr"),
+                              n.iter = min(n.iter,2000))
+  plot(jags.out2)
+  
+  ## run MCMC
+  jags.out2   <- coda.samples (model = j.model2,
+                              variable.names = c("x","tau_add","tau_dbh","tau_inc","mu",
+                                                 "tau_ind","tau_yr","ind","year"),
+                              n.iter = n.iter)
+```
+  
+## Diagnostic plots - extended case
+
+```{r, fig.height=8}
+  #### Diagnostic plots
+  
+  ### DBH
+  layout(matrix(1:8,4,2))
+  out <- as.matrix(jags.out2)
+  x.cols = which(substr(colnames(out),1,1)=="x")   ## which columns are the state variable, x
+  ci <- apply(out[,x.cols],2,quantile,c(0.025,0.5,0.975))
+  ci.names = parse.MatrixNames(colnames(ci),numeric=TRUE)
+  
+  for(i in smp){
+    sel = which(ci.names$row == i)
+    plot(data$time,ci[2,sel],type='n',ylim=range(ci[,sel],na.rm=TRUE),ylab="DBH (cm)",main=i)
+    ciEnvelope(data$time,ci[1,sel],ci[3,sel],col="lightBlue")
+    points(data$time,data$z[i,],pch="+",cex=1.5)
+  }
+  
+  ## growth
+  for(i in smp){
+    sel = which(ci.names$row == i)
+    inc.mcmc = apply(out[,x.cols[sel]],1,diff)
+    inc.ci = apply(inc.mcmc,1,quantile,c(0.025,0.5,0.975))*5
+    
+    plot(data$time[-1],inc.ci[2,],type='n',ylim=range(inc.ci,na.rm=TRUE),ylab="Ring Increment (mm)")
+    ciEnvelope(data$time[-1],inc.ci[1,],inc.ci[3,],col="lightBlue")
+    points(data$time,data$y[i,]*5,pch="+",cex=1.5,type='b',lty=2)
+  }
+```
+
+## Mixed effects, mu and precision - extended case
+
+```{r}
+  ## process model
+  vars = (1:ncol(out))[-c(which(substr(colnames(out),1,1)=="x"),grep("tau",colnames(out)),
+                          grep("year",colnames(out)),grep("ind",colnames(out)))]
+  par(mfrow=c(1,1))
+  for(i in vars){
+    hist(out[,i],main=colnames(out)[i])
+  }
+  if(length(vars)>1) pairs(out[,vars])
+
+  ## Standard Deviations
+  #layout(matrix(c(1,2,3,3),2,2,byrow=TRUE))
+  par(mfrow=c(2,3))
+  prec = out[,grep("tau",colnames(out))]
+  for(i in 1:ncol(prec)){
+    hist(1/sqrt(prec[,i]),main=colnames(prec)[i])
+  }
+  cor(prec)
+  pairs(prec)
+```
+
+## Random effects - extended case
+
+```{r}
+  par(mfrow=c(1,1))
+  ### YEAR
+  year.cols = grep("year",colnames(out))
+  if(length(year.cols>0)){
+    ci.yr <- apply(out[,year.cols],2,quantile,c(0.025,0.5,0.975))
+    plot(data$time,ci.yr[2,],type='n',ylim=range(ci.yr,na.rm=TRUE),main="Year Effect",ylab="cm")
+    ciEnvelope(data$time,ci.yr[1,],ci.yr[3,],col="lightBlue")
+    lines(data$time,ci.yr[2,],lty=1,lwd=2)
+    abline(h=0,lty=2)
+  }
+  
+  ### INDIV
+  ind.cols= which(substr(colnames(out),1,3)=="ind")
+  if(length(ind.cols)>0){
+    boxplot(out[,ind.cols],horizontal=TRUE,outline=FALSE,col=combined$PLOT,main="Individual Effects By Plot",xlab="cm")
+    abline(v=0,lty=2)
+    ## calculate plot-level means for random effects
+    tapply(apply(out[,ind.cols],2,mean),combined$PLOT,mean)
+    table(combined$PLOT)
+    
+    spp = combined$SPP
+    boxplot(out[order(spp),ind.cols],horizontal=TRUE,outline=FALSE,col=spp[order(spp)],main="Individual Effects By Species",xlab="cm")
+    abline(v=0,lty=2)
+    spp.code = levels(spp)[table(spp)>0]
+    legend("bottomright",legend=rev(spp.code),col=rev(which(table(spp)>0)),lwd=4)
+    ## calculate species-level means for random effects
+    tapply(apply(out[,ind.cols],2,mean),combined$SPP,mean)
+  }
+```
+
+Summary:
+
+The diagnostic plots show how the inclusion of random effects (or any effects that account for some aspect of the data or the process in question, for that matter) can reduce the uncertainty in the prediction. Looking at the individual effects by by plot graph, there is no apparent separation between different species by plot. On the other hand, individual effects by species do seem to display some separation between at least some of them. For this reason, we could used species as a fixed or random effect to account for some of the unexplained variability in the estimates. One way to analyze this relationship would be to calculate the overall mean increase in DBH and plot it against the species to see the levels of separability between them (i.e. a boxplot). We could also use additional covariates like precipitation to determine if some of the unexplained variation is caused by increase water availability, and in this case we would also plot the fixed effect against the data to determine if the supposed relationship holds true, and in which magnitude. 
+
+Proposed code:
+
+```
+TreeDataFusionPlus = "
+  
+model{
+  
+  ### Loop over all individuals
+  for(i in 1:ni){
+  
+  #### Data Model: DBH
+  for(t in 1:nt){
+    z[i,t] ~ dnorm(x[i,t],tau_dbh)
+  }
+  
+  #### Data Model: growth
+  for(t in 2:nt){
+    inc[i,t] <- x[i,t]-x[i,t-1]
+    y[i,t] ~ dnorm(inc[i,t],tau_inc)
+  }
+  
+  #### Process Model
+  # Species effect, which has an matrix/array with the same number of individuals, allowing indexing it with 
+  # i, and dummy variables for the species. The pseudocode makes reference to the need to specify a logical
+  # condition in order to bring up the correct distribution for the given species in that iteration
+  
+  for(t in 2:nt){
+      Dnew[i,t] <- x[i,t-1] + mu + ind[i] + year[t] + dummy[i,] * (<condition to select> spp[]) 
+      x[i,t]~dnorm(Dnew[i,t],tau_add)
+    
+  }
+  
+  ## individual effects
+  ind[i] ~ dnorm(0,tau_ind)
+  
+  ## initial condition
+  x[i,1] ~ dnorm(x_ic,tau_ic)
+  }  ## end loop over individuals
+  
+  # INCLUDE species effect, where dist corresponds to any particular distribution that best describes the effect of each species (or genus or functional group if we wanted) in the slope of the DBH growth change over time. 
+  
+  for(s in 1:ns){
+    spp[s] ~ dist(spp_prior) 
+  }
+  
+  ## year effects
+  for(t in 1:nt){
+    year[t] ~ dnorm(0,tau_yr)
+  }
+  
+  
+  #### Priors
+  tau_dbh ~ dgamma(a_dbh,r_dbh)
+  tau_inc ~ dgamma(a_inc,r_inc)
+  tau_add ~ dgamma(a_add,r_add)
+  tau_ind ~ dgamma(1,0.1)
+  tau_yr  ~ dgamma(1,0.1)
+  mu ~ dnorm(0.5,0.5)
+  
+   # We'd need to specify the distribution that best describes the prior for the species, with its corresponding hyperparameters, based on any knowledge we might have on how the species growth rate may differ.
+   
+  spp_prior ~ dist(HYPERPARAMETERS)
+  
+  }"
+
+```
