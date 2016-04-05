@@ -36,7 +36,7 @@ model{
   
   #### Priors
   x[1] ~ dnorm(x_ic,tau_ic)
-  tau_obs ~ dgamma(a_obs,r_obs)
+  tau_obs  ~ dgamma(a_obs,r_obs)
   tau_add ~ dgamma(a_add,r_add)
 }
 "
@@ -121,6 +121,114 @@ To look at how observation frequency affects data assimilation, convert 3 out of
 * Generate a predicted (median) vs observed plot for the data points that were removed
 * Comment on the accuracy and precision of the estimates.
 
+Conversion to NA's
+
+```{r}
+nas <- sample(length(y), (y*0.75), replace = FALSE)
+y.nas <- y
+y.nas[nas] <- NA
+```
+
+New model
+
+```{r}
+RandomWalk2 = "
+model{
+  
+  #### Data Model
+  for(i in 1:n){
+    y.nas[i] ~ dnorm(x[i],tau_obs)
+  }
+  
+  #### Process Model
+  for(i in 2:n){
+    x[i]~dnorm(x[i-1],tau_add)
+  }
+  
+  #### Priors
+  x[1] ~ dnorm(x_ic,tau_ic)
+  tau_obs  ~ dgamma(a_obs,r_obs)
+  tau_add ~ dgamma(a_add,r_add)
+}
+"
+```
+
+Data re-definition
+
+```{r}
+data.nas <- list(y.nas=log(y.nas),n=length(y.nas),x_ic=log(1000),tau_ic=100,a_obs=1,r_obs=1,a_add=1,r_add=1)
+```
+
+Initial state
+
+```{r}
+nchain = 3
+init2 <- list()
+for(i in 1:nchain){
+  y.samp2 = sample(y.nas,length(y.nas),replace=TRUE)
+  init2[[i]] <- list(tau_add=1/var(diff(log(y.samp2))),tau_obs=5/var(log(y.samp2)))
+}
+```
+
+Return JAGS model
+
+```{r}
+j.model2   <- jags.model (file = textConnection(RandomWalk2),
+                             data = data.nas,
+                             inits = init2,
+                             n.chains = 3)
+```
+
+Assess convergence
+
+```{r}
+## burn-in
+jags.out2   <- coda.samples (model = j.model2,
+                            variable.names = c("tau_add","tau_obs"),
+                                n.iter = 1000)
+plot(jags.out2)
+```
+
+Larger sample 
+
+```{r}
+jags.out2   <- coda.samples (model = j.model2,
+                            variable.names = c("x","tau_add","tau_obs"),
+                                n.iter = 10000)
+```
+
+Plot - Stars are the NA values, crosses are the rest
+
+```{r}
+ciEnvelope <- function(x,ylo,yhi,...){
+  polygon(cbind(c(x, rev(x), x[1]), c(ylo, rev(yhi),
+                                      ylo[1])), border = NA,...) 
+}
+out2 <- as.matrix(jags.out2)
+ci2 <- apply(exp(out2[,3:ncol(out2)]),2,quantile,c(0.025,0.5,0.975))
+
+plot(time,ci2[2,],type='n',ylim=range(y,na.rm=FALSE),ylab="Flu Index",log='y',xlim=time[time.rng])
+## adjust x-axis label to be monthly if zoomed
+if(diff(time.rng) < 100){ 
+  axis.Date(1, at=seq(time[time.rng[1]],time[time.rng[2]],by='month'), format = "%Y-%m")
+}
+ciEnvelope(time,ci2[1,],ci2[3,],col="chartreuse3")
+points(time,y.nas,pch="+",cex=1.2)
+points(time[nas], y[nas], pch="*", cex=0.9)
+```
+
+Posterior distributions 
+```{r}
+layout(matrix(c(1,2,3,3),2,2,byrow=TRUE))
+hist(1/sqrt(out2[,1]),main=colnames(out2)[1])
+hist(1/sqrt(out2[,2]),main=colnames(out2)[2])
+plot(out2[,1],out2[,2],pch=".",xlab=colnames(out2)[1],ylab=colnames(out2)[2])
+cor(out2[,1:2])
+```
+
+Summary:
+
+The confidence interval is generally wider for the run with the data converted into NA's compared to the original data. similarly, the posterior distributions for `tau_add and` and `tau_obs` display wider ranges, as expected given the big fraction of missing data. Even then, the model does a remarkable job of keeping the CI very low despite missing three fourths of the data. 
 Extra Credit:
 -------------
 
