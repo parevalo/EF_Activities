@@ -1,0 +1,267 @@
+---
+title: "Exercise 9 - Kalman Filter"
+author: "Paulo Arevalo"
+date: "April 5, 2016"
+output: html_document
+---
+
+```{r}
+## load the Google flu data & select states
+gflu = read.csv("http://www.google.org/flutrends/about/data/flu/us/data.txt",skip=11)
+time = as.Date(gflu$Date)
+states = c("Massachusetts","Connecticut","Rhode.Island","New.Hampshire","Vermont","Maine")
+nstates = length(states)
+y = t(gflu[,states])
+
+## define adjacency between states slected
+adj = matrix(c(0,1,1,1,1,0,    ### state-to-state spatial adjacency (self=0)
+               1,0,1,0,0,0,
+               1,1,0,0,0,0,
+               1,0,0,0,1,1,
+               1,0,0,1,0,0,
+               0,0,0,1,0,0),nstates,nstates,byrow=TRUE)
+
+## plot time-series from states
+plot(time,1:length(time),type='n',ylab="Flu Index",lwd=2,log='y',ylim=range(y,na.rm=TRUE))
+for(i in 1:nstates){
+  lines(time,y[i,],col=i,lwd=2)
+}
+legend("topleft",legend=states,lwd=2,col=1:nstates)
+```
+
+Kalman Filter Function
+
+```{r}
+##'  Kalman Filter
+##' @param  M   = model matrix
+##' @param  mu0 = initial condition mean vector
+##' @param  P0  = initial condition covariance matrix
+##' @param  Q   = process error covariance matrix
+##' @param  R   = observation error covariance matrix
+##' @param  Y   = observation matrix (with missing values as NAs), time as col's
+##'
+##' @return list
+##'  mu.f, mu.a  = state mean vector for (a)nalysis and (f)orecast steps
+##'  P.f, P.a    = state covariance matrix for a and f
+KalmanFilter <- function(M,mu0,P0,Q,R,Y){
+  
+  ## storage
+  nstates = nrow(Y)  
+  nt = ncol(Y)
+  mu.f  = matrix(NA,nstates,nt+1)  ## forecast mean for time t
+  mu.a  = matrix(NA,nstates,nt)  ## analysis mean for time t
+  P.f  = array(NA,c(nstates,nstates,nt+1))  ## forecast variance for time t
+  P.a  = array(NA,c(nstates,nstates,nt))  ## analysis variance for time t
+
+  ## initialization
+  mu.f[,1] = mu0
+  P.f[,,1] = P0
+  I = diag(1,nstates)
+
+  ## run updates sequentially for each observation.
+  for(t in 1:nt){
+
+    ## Analysis step: combine previous forecast with observed data
+    obs = !is.na(Y[,t]) ## which Y's were observed?
+    if(any(obs)){
+      H <- I[obs,]                                                        ## observation matrix
+      K <- P.f[,,t] %*% t(H) %*% solve(H%*%P.f[,,t]%*%t(H) + R[obs,obs])  ## Kalman gain
+      mu.a[,t] <- mu.f[,t] + K%*%(Y[obs,t] - H %*% mu.f[,t])              ## update mean
+      P.a[,,t] <- (1-K %*% H)*P.f[,,t]                                    ## update covariance
+    } else {
+      ##if there's no data, the posterior is the prior
+      mu.a[,t] = mu.f[,t]
+      P.a[,,t] = P.f[,,t]
+    }
+
+    ## Forecast step: predict to next step from current
+    mu.f[,t+1] = M%*%mu.a[,t]
+    P.f[,,t+1] = Q + M*P.a[,,t]*t(M)
+  
+  }
+  
+  return(list(mu.f=mu.f,mu.a=mu.a,P.f=P.f,P.a=P.a))
+}
+
+ciEnvelope <- function(x,ylo,yhi,...){
+  polygon(cbind(c(x, rev(x), x[1]), c(ylo, rev(yhi),
+                                      ylo[1])), border = NA,...) 
+}
+```
+
+## Kalman Filter - Default Run
+
+```{r}
+## log transform data
+Y   = log10(y)
+
+## load parameters (assume known)
+load("data/KFalpha.params.Rdata")
+
+## options for process model 
+alpha = 0       ## assume no spatial flux
+#alpha = 0.05    ## assume a large spatial flux
+M = adj*alpha + diag(1-alpha*apply(adj,1,sum))  ## random walk with flux
+
+## options for process error covariance
+Q = tau_proc            ## full covariance matrix
+#Q = diag(diag(Q))       ## diagonal covariance matrix
+
+## observation error covariance (assumed independent)  
+R = diag(tau_obs,nstates) 
+
+## prior on first step, initialize with long-term mean and covariance
+mu0 = apply(Y,1,mean,na.rm=TRUE)
+P0 = cov(t(Y),use="pairwise.complete.obs")
+
+## Run Kalman Filter
+KF00 = KalmanFilter(M,mu0,P0,Q,R,Y)
+```
+
+Visualization function
+
+```{r}
+plotting_fnc <- function(runobj){
+
+  attach(runobj)
+  nt = length(time)
+  
+  ### plot ANALYSIS mean & CI time-series
+  par(mfrow=c(3,1))
+  for(i in 1:6){
+    ci = rbind(mu.a[i,]-1.96*sqrt(P.a[i,i,]),mu.a[i,]+1.96*sqrt(P.a[i,i,]))
+    plot(time,mu.a[i,],ylim=range(ci,na.rm=TRUE),type='n',main=states[i])
+    ciEnvelope(time,ci[1,],ci[2,],col="lightBlue")
+    lines(time,mu.a[i,],col=4)
+    lines(time,Y[i,])
+  }
+  
+  ## plot ANALYSIS and FORECAST variance time-series
+  par(mfrow=c(3,1))
+  for(i in 1:6){
+    plot(time,sqrt(P.a[i,i,]),ylim=c(0,sqrt(max(c(P.a[i,i,],P.f[i,i,])))),main=states[i],xlab="Time",
+         ylab="Std Error",type='l')
+    lines(time,sqrt(P.f[i,i,1:nt]),col=2)
+    points(time[is.na(Y[i,])],rep(0,nt)[is.na(Y[i,])],pch="*",col=3) ## flag's the zero's
+    legend("topright",legend=c("Analysis","Forecast","NAs"),col=1:3,lty=c(1,1,NA),pch=c(NA,NA,1),cex=1.4)
+  }
+  
+  detach(runobj)
+  
+}
+```
+
+Plot results of the defaul model
+
+```{r}
+plotting_fnc(KF00)
+```
+
+## Kalman Filter 01 - Process error is diagonal COV matrix
+
+```{r}
+## log transform data
+Y   = log10(y)
+
+## load parameters (assume known)
+load("data/KFalpha.params.Rdata")
+
+## options for process model 
+alpha = 0       ## assume no spatial flux
+#alpha = 0.05    ## assume a large spatial flux
+M = adj*alpha + diag(1-alpha*apply(adj,1,sum))  ## random walk with flux
+
+## options for process error covariance
+#Q = tau_proc            ## full covariance matrix
+Q = diag(diag(Q))       ## diagonal covariance matrix
+
+## observation error covariance (assumed independent)  
+R = diag(tau_obs,nstates) 
+
+## prior on first step, initialize with long-term mean and covariance
+mu0 = apply(Y,1,mean,na.rm=TRUE)
+P0 = cov(t(Y),use="pairwise.complete.obs")
+
+## Run Kalman Filter
+KF01 = KalmanFilter(M,mu0,P0,Q,R,Y)
+plotting_fnc(KF01)
+```
+
+## Kalman Filter 11 - alpha = 0.05 and the diagonal Q matrix
+
+```{r}
+## log transform data
+Y   = log10(y)
+
+## load parameters (assume known)
+load("data/KFalpha.params.Rdata")
+
+## options for process model 
+#alpha = 0       ## assume no spatial flux
+alpha = 0.05    ## assume a large spatial flux
+M = adj*alpha + diag(1-alpha*apply(adj,1,sum))  ## random walk with flux
+
+## options for process error covariance
+#Q = tau_proc            ## full covariance matrix
+Q = diag(diag(Q))       ## diagonal covariance matrix
+
+## observation error covariance (assumed independent)  
+R = diag(tau_obs,nstates) 
+
+## prior on first step, initialize with long-term mean and covariance
+mu0 = apply(Y,1,mean,na.rm=TRUE)
+P0 = cov(t(Y),use="pairwise.complete.obs")
+
+## Run Kalman Filter
+KF11 = KalmanFilter(M,mu0,P0,Q,R,Y)
+plotting_fnc(KF11)
+```
+
+## Kalman Filter 10 - alpha = 0.05 and the original Q matrix
+
+```{r}
+## log transform data
+Y   = log10(y)
+
+## load parameters (assume known)
+load("data/KFalpha.params.Rdata")
+
+## options for process model 
+#alpha = 0       ## assume no spatial flux
+alpha = 0.05    ## assume a large spatial flux
+M = adj*alpha + diag(1-alpha*apply(adj,1,sum))  ## random walk with flux
+
+## options for process error covariance
+Q = tau_proc            ## full covariance matrix
+#Q = diag(diag(Q))       ## diagonal covariance matrix
+
+## observation error covariance (assumed independent)  
+R = diag(tau_obs,nstates) 
+
+## prior on first step, initialize with long-term mean and covariance
+mu0 = apply(Y,1,mean,na.rm=TRUE)
+P0 = cov(t(Y),use="pairwise.complete.obs")
+
+## Run Kalman Filter
+KF10 = KalmanFilter(M,mu0,P0,Q,R,Y)
+plotting_fnc(KF10)
+```
+
+
+The assignment is to run the KF under all four combinations of covariance in the process model versus process error and compare the results. In particular you'll want to pay attention to the missing data at the beginning of the timeseries for some states. You'll also want to comment on how spatial adjacency affects the confidence in the inferences (some states are more isolated than others) in the four different scenarios. Finally, you'll want to note that the alpha estimated from the data itself (0.000209), is close to zero and thus our real forecast would be much more like our no-flux run than our high flux run.
+
+* Rerun with process error set to just the diagonal matrix of Q, compare the results with the original
+
+* Rerun with alpha = 0.05 and the diagonal Q matrix
+
+* Rerun with alpha = 0.05 and the original Q matrix
+
+* Explain conceptually what would have to change in the Kalman Filter function if we replaced the current linear model with a nonlinear process model, in order to turn it into an Extended Kalman Filter function.
+
+## Summary:
+
+If we compare the default run (00) with the one that uses diagonal covariance matrix (01) we see that the confidence in the inferences for the times with no data decreases in the second case, as we fail to account for the interstate process error relationships at the same time that we assume no spatial flux. In the third case (11), even when we use the diagonal covariance matrix, the confidence in the inferences is much higher because we DO include some additional information on the spatial flux that helps to constrain the model estimates. In the last case (10), when we include both the full covariance matrix and the spatial flux, the confidence intervals seem to get even tigther, especially for Rhode Island and Vermont. Additionally, when the full covariance matrix is used, the shape of the curves for the periods with no data is more precisely defined and the spike that becomes apparent is very similar between states, coinciding with the very close relationship between flu trends across states that we saw in the first figure. Overall, when we include information on spatial adjacency, the confidence estimates tends to be tigther for those states that are more connected (like New Hampshire and Rhode Island), but they also seem to benefit less connected states like Vermont. Thus if we were to use a very low alpha, as it is suggested from the data itself, then the important of the full covariance matrix becomes more apparent.
+
+If we look at the time-series plot of analysis and forecast variance we observe that when we use an alpha of zero, the forecast variance increases until it leaves the no-data period and then becomes very close to the actual values. When we use an alpha of 0.05 though, for most of the cases the variance decreases quickly and then stays the same until it exits the no-data period.  
+
+In order to turn the function into an Extended Kalman Filter, we'd replace the linear model matrix (M) with the Jacobian (F) of the process model, in order to estimate the forecast covariance, which cannot be updated with the non-linear model directly. Given that the values for F do not stay constant in time, because the Jacobian is evaluated around the mean at each time point, we'd need to add one additional step that obtains these specific values for M, before updating the forecast mean and covariance. 
